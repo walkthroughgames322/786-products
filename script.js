@@ -1,9 +1,6 @@
 // Admin Code - Change this to your preferred code
 const ADMIN_CODE = "786786";
 
-// Your deployed Google Apps Script web app URL (replace with your actual URL)
-const API_URL = 'https://script.google.com/macros/s/AKfycbyHGfoU7lTLBPhZchBHr8p2dXjxkaqndQWZndis2fKDY2UobHqkCiQdaC9YQtfLF-vtRg/exec';
-
 // DOM Elements
 const searchInput = document.getElementById('searchInput');
 const adminBtn = document.createElement('button');
@@ -20,8 +17,8 @@ const playlistFormContainer = document.createElement('div');
 
 // State
 let isAdmin = false;
-let currentProducts = []; // Will fetch from server
-let playlists = ['Cosmetics', 'Electronics', 'Kitchen']; // Will be managed locally (no playlist API yet)
+let currentProducts = JSON.parse(localStorage.getItem('products')) || [];
+let playlists = JSON.parse(localStorage.getItem('playlists')) || ['Cosmetics', 'Electronics', 'Kitchen'];
 
 // Initialize Admin UI
 function initAdminUI() {
@@ -109,41 +106,6 @@ function initAdminUI() {
     setupEventListeners();
 }
 
-// Fetch all products from server
-async function fetchProducts() {
-    try {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error('Failed to fetch products');
-        const data = await res.json();
-        currentProducts = data;
-        renderProducts();
-        renderPlaylistButtons();
-    } catch (error) {
-        alert('Error fetching products from server: ' + error.message);
-        currentProducts = []; // fallback empty
-        renderProducts();
-        renderPlaylistButtons();
-    }
-}
-
-// Send product data to server for add/update/delete
-async function sendProductToServer(product, action) {
-    const payload = { ...product, action };
-    try {
-        const res = await fetch(API_URL, {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) throw new Error('Failed to ' + action + ' product');
-        const text = await res.text();
-        return text;
-    } catch (error) {
-        alert('Error saving product: ' + error.message);
-        throw error;
-    }
-}
-
 // Render playlist buttons
 function renderPlaylistButtons() {
     const playlistButtonsContainer = document.getElementById('playlistButtons');
@@ -226,9 +188,9 @@ function setupEventListeners() {
     });
 
     // Product form submit
-    productForm.addEventListener('submit', async (e) => {
+    productForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        await saveProduct();
+        saveProduct();
     });
 
     // Playlist form - add playlist
@@ -245,232 +207,271 @@ function setupEventListeners() {
     });
 }
 
-// Render products based on search and playlist filter
-function renderProducts(searchText = '', playlistFilter = '') {
-    const container = document.getElementById('productsContainer');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    let filteredProducts = currentProducts;
-
-    if (playlistFilter) {
-        filteredProducts = filteredProducts.filter(p => p.playlist === playlistFilter);
-    }
-
-    if (searchText) {
-        filteredProducts = filteredProducts.filter(p =>
-            p.name.toLowerCase().includes(searchText)
-        );
-    }
-
-    if (filteredProducts.length === 0) {
-        container.textContent = 'No products found.';
-        return;
-    }
-
-    filteredProducts.forEach(product => {
-        const card = document.createElement('div');
-        card.classList.add('product-card');
-
-        // Image element - use URL or base64
-        const img = document.createElement('img');
-        img.src = product.image || '';
-        img.alt = product.name;
-        card.appendChild(img);
-
-        // Name
-        const name = document.createElement('h4');
-        name.textContent = product.name;
-        card.appendChild(name);
-
-        // Link
-        const link = document.createElement('a');
-        link.href = product.link;
-        link.target = '_blank';
-        link.textContent = 'View Product';
-        card.appendChild(link);
-
-        // Admin controls (Edit/Delete)
-        if (isAdmin) {
-            const controls = document.createElement('div');
-            controls.classList.add('admin-product-controls');
-
-            const editBtn = document.createElement('button');
-            editBtn.textContent = 'Edit';
-            editBtn.classList.add('edit-btn');
-            editBtn.addEventListener('click', () => {
-                showProductForm(product);
-            });
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.classList.add('delete-btn');
-            deleteBtn.addEventListener('click', async () => {
-                if (confirm('Are you sure you want to delete this product?')) {
-                    await deleteProduct(product.id);
-                }
-            });
-
-            controls.appendChild(editBtn);
-            controls.appendChild(deleteBtn);
-            card.appendChild(controls);
-        }
-
-        container.appendChild(card);
-    });
-}
-
-// Show product form for add or edit
+// Show product form
 function showProductForm(product = null) {
-    productFormContainer.classList.remove('hidden');
-    productForm.reset();
-
-    // Populate playlist select
-    const playlistSelect = productForm.querySelector('#productPlaylist');
-    playlistSelect.innerHTML = '';
-    playlists.forEach(pl => {
-        const option = document.createElement('option');
-        option.value = pl;
-        option.textContent = pl;
-        playlistSelect.appendChild(option);
-    });
+    const playlistSelect = document.getElementById('productPlaylist');
+    playlistSelect.innerHTML = playlists.map(playlist => 
+        `<option value="${playlist}">${playlist}</option>`
+    ).join('');
 
     if (product) {
-        productForm.querySelector('#productId').value = product.id || '';
-        productForm.querySelector('#productName').value = product.name || '';
-        productForm.querySelector('#productLink').value = product.link || '';
-        playlistSelect.value = product.playlist || playlists[0];
-        // Image preview is skipped, user must upload new image if they want to change
+        document.getElementById('productName').value = product.name;
+        document.getElementById('productLink').value = product.link;
+        document.getElementById('productPlaylist').value = product.playlist;
+        document.getElementById('productId').value = product.id;
     } else {
-        productForm.querySelector('#productId').value = '';
+        productForm.reset();
+        document.getElementById('productId').value = '';
     }
+
+    productFormContainer.classList.remove('hidden');
 }
 
-// Save product (add or update)
-async function saveProduct() {
-    const id = productForm.querySelector('#productId').value || generateId();
-    const name = productForm.querySelector('#productName').value.trim();
-    const link = productForm.querySelector('#productLink').value.trim();
-    const playlist = productForm.querySelector('#productPlaylist').value;
+// Save product
+function saveProduct() {
+    const productId = document.getElementById('productId').value;
+    const productName = document.getElementById('productName').value;
+    const productLink = document.getElementById('productLink').value;
+    const productPlaylist = document.getElementById('productPlaylist').value;
+    const productImage = document.getElementById('productImage').files[0];
 
-    if (!name || !link || !playlist) {
+    if (!productName || !productLink || !productPlaylist) {
         alert('Please fill all required fields');
         return;
     }
 
-    // Handle image upload and convert to base64
-    const fileInput = productForm.querySelector('#productImage');
-    let base64Image = '';
-    if (fileInput.files && fileInput.files[0]) {
-        base64Image = await fileToBase64(fileInput.files[0]);
-    } else {
-        // If editing and no new image uploaded, keep existing image
-        const existingProduct = currentProducts.find(p => p.id === id);
-        base64Image = existingProduct ? existingProduct.image : '';
-    }
+    const product = {
+        id: productId || Date.now().toString(),
+        name: productName,
+        link: productLink,
+        playlist: productPlaylist,
+        image: productId && !productImage ? 
+            currentProducts.find(p => p.id === productId)?.image : null
+    };
 
-    const product = { id, name, link, playlist, image: base64Image };
-
-    // Determine if adding or updating
-    const existingIndex = currentProducts.findIndex(p => p.id === id);
-    try {
-        if (existingIndex === -1) {
-            await sendProductToServer(product, 'add');
-            currentProducts.push(product);
-        } else {
-            await sendProductToServer(product, 'update');
-            currentProducts[existingIndex] = product;
-        }
-        alert('Product saved successfully');
-        productFormContainer.classList.add('hidden');
-        renderProducts();
-    } catch (error) {
-        // Error handled inside sendProductToServer
-    }
-}
-
-// Delete product
-async function deleteProduct(productId) {
-    try {
-        await sendProductToServer({ id: productId }, 'delete');
-        currentProducts = currentProducts.filter(p => p.id !== productId);
-        renderProducts();
-    } catch (error) {
-        // Error handled in sendProductToServer
-    }
-}
-
-// Convert file to base64
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
+    // Handle image
+    if (productImage) {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
+        reader.onload = function(e) {
+            product.image = e.target.result;
+            saveProductToStorage(product);
+        };
+        reader.readAsDataURL(productImage);
+    } else {
+        saveProductToStorage(product);
+    }
 }
 
-// Generate random ID for products
-function generateId() {
-    return 'id-' + Math.random().toString(36).substr(2, 9);
-}
-
-// Show playlist management form
-function showPlaylistForm() {
-    playlistFormContainer.classList.remove('hidden');
-    renderPlaylistList();
-}
-
-// Render playlist list in the playlist form
-function renderPlaylistList() {
-    const playlistList = document.getElementById('playlistList');
-    playlistList.innerHTML = '';
-
-    playlists.forEach((pl, index) => {
-        const li = document.createElement('li');
-        li.textContent = pl;
-
-        if (isAdmin) {
-            const delBtn = document.createElement('button');
-            delBtn.textContent = 'Delete';
-            delBtn.classList.add('delete-playlist-btn');
-            delBtn.addEventListener('click', () => {
-                if (confirm(`Delete playlist "${pl}"? Products in this playlist will keep their playlist.`)) {
-                    playlists.splice(index, 1);
-                    renderPlaylistList();
-                    renderPlaylistButtons();
-                }
-            });
-            li.appendChild(delBtn);
+// Save product to localStorage
+function saveProductToStorage(product) {
+    if (product.id) {
+        // Update existing product
+        const index = currentProducts.findIndex(p => p.id === product.id);
+        if (index !== -1) {
+            currentProducts[index] = product;
+        } else {
+            currentProducts.push(product);
         }
+    } else {
+        // Add new product
+        product.id = Date.now().toString();
+        currentProducts.push(product);
+    }
 
-        playlistList.appendChild(li);
-    });
+    localStorage.setItem('products', JSON.stringify(currentProducts));
+    renderProducts();
+    renderPlaylistButtons();
+    productFormContainer.classList.add('hidden');
+    alert('Product saved successfully!');
 }
 
-// Add new playlist
+// Show playlist form
+function showPlaylistForm() {
+    const playlistList = document.getElementById('playlistList');
+    playlistList.innerHTML = playlists.map(playlist => `
+        <li>
+            <span>${playlist}</span>
+            <div>
+                <button class="edit-playlist-btn" data-playlist="${playlist}">Edit</button>
+                <button class="delete-playlist-btn" data-playlist="${playlist}">Delete</button>
+            </div>
+        </li>
+    `).join('');
+
+    // Add event listeners for edit/delete buttons
+    document.querySelectorAll('.edit-playlist-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const oldName = e.target.dataset.playlist;
+            const newName = prompt('Enter new playlist name:', oldName);
+            if (newName && newName !== oldName) {
+                editPlaylist(oldName, newName);
+            }
+        });
+    });
+
+    document.querySelectorAll('.delete-playlist-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            if (confirm(`Are you sure you want to delete playlist "${e.target.dataset.playlist}"?`)) {
+                deletePlaylist(e.target.dataset.playlist);
+            }
+        });
+    });
+
+    playlistFormContainer.classList.remove('hidden');
+}
+
+// Add playlist
 function addPlaylist() {
-    const input = document.getElementById('newPlaylistName');
-    const name = input.value.trim();
-    if (!name) {
-        alert('Enter playlist name');
+    const newPlaylistName = document.getElementById('newPlaylistName').value.trim();
+    if (!newPlaylistName) {
+        alert('Please enter a playlist name');
         return;
     }
-    if (playlists.includes(name)) {
+
+    if (playlists.includes(newPlaylistName)) {
         alert('Playlist already exists');
         return;
     }
-    playlists.push(name);
-    input.value = '';
-    renderPlaylistList();
+
+    playlists.push(newPlaylistName);
+    localStorage.setItem('playlists', JSON.stringify(playlists));
+    document.getElementById('newPlaylistName').value = '';
+    showPlaylistForm();
     renderPlaylistButtons();
 }
 
-// Initial setup
-function init() {
-    initAdminUI();
-    fetchProducts();
+// Edit playlist
+function editPlaylist(oldName, newName) {
+    // Update playlists array
+    const index = playlists.indexOf(oldName);
+    if (index !== -1) {
+        playlists[index] = newName;
+    }
+
+    // Update products with this playlist
+    currentProducts = currentProducts.map(product => {
+        if (product.playlist === oldName) {
+            return { ...product, playlist: newName };
+        }
+        return product;
+    });
+
+    localStorage.setItem('playlists', JSON.stringify(playlists));
+    localStorage.setItem('products', JSON.stringify(currentProducts));
+    showPlaylistForm();
+    renderPlaylistButtons();
+    renderProducts();
 }
 
-init();
+// Delete playlist
+function deletePlaylist(name) {
+    // Remove from playlists array
+    playlists = playlists.filter(playlist => playlist !== name);
+
+    // Remove products with this playlist
+    currentProducts = currentProducts.filter(product => product.playlist !== name);
+
+    localStorage.setItem('playlists', JSON.stringify(playlists));
+    localStorage.setItem('products', JSON.stringify(currentProducts));
+    showPlaylistForm();
+    renderPlaylistButtons();
+    renderProducts();
+}
+
+// Render products
+function renderProducts(searchTerm = '', playlistFilter = '') {
+    const productList = document.getElementById('productList');
+    if (!productList) return;
+
+    productList.innerHTML = '';
+
+    let filteredProducts = currentProducts;
+
+    // Apply search filter if search term exists
+    if (searchTerm) {
+        filteredProducts = filteredProducts.filter(product => 
+            product.name.toLowerCase().includes(searchTerm) ||
+            product.playlist.toLowerCase().includes(searchTerm)
+        );
+    }
+
+    // Apply playlist filter if specified
+    if (playlistFilter) {
+        filteredProducts = filteredProducts.filter(product => 
+            product.playlist === playlistFilter
+        );
+    }
+
+    if (filteredProducts.length === 0) {
+        const noResults = document.createElement('div');
+        noResults.classList.add('no-results');
+        noResults.textContent = searchTerm || playlistFilter 
+            ? 'No products found matching your criteria.'
+            : 'No products available.';
+        productList.appendChild(noResults);
+        return;
+    }
+
+    filteredProducts.forEach(product => {
+        const productCard = document.createElement('div');
+        productCard.classList.add('product-card');
+        
+        // Highlight search term in product name
+        const highlightedName = searchTerm 
+            ? product.name.replace(new RegExp(searchTerm, 'gi'), 
+              match => `<span class="search-highlight">${match}</span>`)
+            : product.name;
+            
+        // Highlight search term in playlist
+        const highlightedPlaylist = searchTerm 
+            ? product.playlist.replace(new RegExp(searchTerm, 'gi'), 
+              match => `<span class="search-highlight">${match}</span>`)
+            : product.playlist;
+
+        productCard.innerHTML = `
+            <div class="product-image-container">
+                ${product.image ? `<img src="${product.image}" alt="${product.name}">` : '<div class="no-image">No Image</div>'}
+            </div>
+            <div class="product-info">
+                <h3>${highlightedName}</h3>
+                <p>Playlist: ${highlightedPlaylist}</p>
+                <a href="${product.link}" target="_blank" class="product-link">View Product</a>
+                ${isAdmin ? `
+                <div class="product-actions">
+                    <button class="edit-product-btn" data-id="${product.id}">Edit</button>
+                    <button class="delete-product-btn" data-id="${product.id}">Delete</button>
+                </div>
+                ` : ''}
+            </div>
+        `;
+
+        if (isAdmin) {
+            productCard.querySelector('.edit-product-btn').addEventListener('click', () => {
+                const productToEdit = currentProducts.find(p => p.id === product.id);
+                showProductForm(productToEdit);
+            });
+
+            productCard.querySelector('.delete-product-btn').addEventListener('click', () => {
+                if (confirm(`Are you sure you want to delete "${product.name}"?`)) {
+                    deleteProduct(product.id);
+                }
+            });
+        }
+
+        productList.appendChild(productCard);
+    });
+}
+
+// Delete product
+function deleteProduct(id) {
+    currentProducts = currentProducts.filter(product => product.id !== id);
+    localStorage.setItem('products', JSON.stringify(currentProducts));
+    renderProducts();
+}
+
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    initAdminUI();
+    renderPlaylistButtons();
+    renderProducts();
+});
